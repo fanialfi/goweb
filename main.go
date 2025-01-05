@@ -23,7 +23,9 @@ func main() {
 
 	address := "localhost:3000"
 	log.Printf("server started at %s\n", address)
-	err := http.ListenAndServe(address, nil)
+	server := new(http.Server)
+	server.Addr = address
+	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println("error :", err.Error())
 	}
