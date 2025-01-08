@@ -2,56 +2,82 @@ package main
 
 import (
 	"fmt"
-	"html/template"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
 func main() {
-	http.HandleFunc("/", routeIndexGet)
 	http.HandleFunc("/process", routeSubmitPost)
 
 	fmt.Println("server started at localhost:9000")
 	http.ListenAndServe(":9000", nil)
 }
 
-func routeIndexGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		tmpl := template.Must(template.New("form").ParseFiles(filepath.Join("views", "view.html")))
-		if err := tmpl.Execute(w, nil); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+func routeSubmitPost(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// r.ParseMultipartForm digunakan untuk memparsing form data yang ada file-nya, dimana argument 1024
+	// pada method tersebut adalah max memory,
+	// dengan memanggil method tersebut membuat file yang terupload akan disimpan ke memory sebesar alokasi memori yang diberikan
+	// jika alokasi yang diberikan tidak cukup, maka file akan disimpan didalam temporary file
+	if err := r.ParseMultipartForm(1024); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	http.Error(w, "", http.StatusBadRequest)
-}
+	name := r.FormValue("name")
+	uploadFile, handler, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-func routeSubmitPost(w http.ResponseWriter, r *http.Request) {
-	fmt.Println(r.Header.Get("Content-Type"))
-	if r.Method == http.MethodPost {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		tmpl := template.Must(template.New("result").ParseFiles(filepath.Join("views", "view.html")))
-
-		if err := r.ParseMultipartForm(10 << 10); err != nil {
-			fmt.Println("error cok", err.Error())
-			http.Error(w, fmt.Sprintf("error parse form : %s", err.Error()), http.StatusInternalServerError)
+	defer func() {
+		err := uploadFile.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}()
 
-		name := r.FormValue("name")
-		message := r.FormValue("message")
-		data := map[string]string{
-			"name":    name,
-			"message": message,
-		}
-
-		if err := tmpl.Execute(w, data); err != nil {
-			fmt.Println("error cok", err.Error())
-			http.Error(w, fmt.Sprintf("anjay error : %s", err.Error()), http.StatusInternalServerError)
-		}
+	dir, err := os.Getwd()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Error(w, "", http.StatusBadRequest)
+
+	// create file
+	filename := handler.Filename
+	if name != "" {
+		filename = fmt.Sprintf("file-%s%s", name, filepath.Ext(handler.Filename))
+	}
+
+	fileLocation := filepath.Join(dir, "files", filename)
+	targetFile, err := os.Create(fileLocation)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Printf("error cok : %s\n", err.Error())
+		return
+	}
+
+	defer func() {
+		err := targetFile.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}()
+
+	if _, err := io.Copy(targetFile, uploadFile); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("done"))
 }
